@@ -1,0 +1,25 @@
+# Ignore large sequencing files
+*.fastq
+*.bam
+*.sam
+*.bai
+*.vcf
+*.gz
+
+# Ignore intermediate results
+*.RData
+*.rds
+*.h5
+*.sqlite
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore virtual environments
+venv/
+.env/
+__pycache__/
+.Rhistory
+
+# Ignore Conda environment files
+environment/

@@ -1,0 +1,15 @@
+Status	RNA_seq_workflow/output/3_aligned_sequences/aligned_bam/SRR8437484.sorted.bam	RNA_seq_workflow/output/3_aligned_sequences/aligned_bam/SRR8437485.sorted.bam	RNA_seq_workflow/output/3_aligned_sequences/aligned_bam/SRR8437482.sorted.bam	RNA_seq_workflow/output/3_aligned_sequences/aligned_bam/SRR8437483.sorted.bam	RNA_seq_workflow/output/3_aligned_sequences/aligned_bam/SRR8437480.sorted.bam	RNA_seq_workflow/output/3_aligned_sequences/aligned_bam/SRR8437481.sorted.bam	RNA_seq_workflow/output/3_aligned_sequences/aligned_bam/SRR8437478.sorted.bam	RNA_seq_workflow/output/3_aligned_sequences/aligned_bam/SRR8437479.sorted.bam
+Assigned	30271128	28917892	35106452	27027856	26978922	31018916	28649504	33457556
+Unassigned_Unmapped	2406937	3534113	2675687	2203110	2152505	11848666	2363861	2799421
+Unassigned_Read_Type	0	0	0	0	0	0	0	0
+Unassigned_Singleton	0	0	0	0	0	0	0	0
+Unassigned_MappingQuality	0	0	0	0	0	0	0	0
+Unassigned_Chimera	0	0	0	0	0	0	0	0
+Unassigned_FragmentLength	0	0	0	0	0	0	0	0
+Unassigned_Duplicate	0	0	0	0	0	0	0	0
+Unassigned_MultiMapping	8326409	5341734	11560455	8146363	6175862	5087030	5901113	6095187
+Unassigned_Secondary	0	0	0	0	0	0	0	0
+Unassigned_NonSplit	0	0	0	0	0	0	0	0
+Unassigned_NoFeatures	6593461	6119681	10364710	6796296	5697286	6447598	7332186	7669356
+Unassigned_Overlapping_Length	0	0	0	0	0	0	0	0
+Unassigned_Ambiguity	174966	172364	257091	162453	160462	169242	186435	219778

@@ -1,0 +1,466 @@
+---
+title: "Transcriptomic Response of Barley to *Pseudomonas syringae* Infection"
+author: "Abhishek Shrestha"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+### Introduction
+The samples were collected from NCBI from a study 'WRKY Transcription Factors Associated With NPR1-Mediated Acquired Resistance in Barley Are Potential Resources to Improve Wheat Resistance to Puccinia triticina' and I selected few samples to run a simple RNA seq pipeline.
+
+### Getting setup
+The first part of the analysis was performed in linux using VS Code. I transferred the working folder to a new folder that was feasible for R to access.
+
+### Step 1: Importing gene counts into R studio
+After the first part of the workflow is completed, we can now use the gene count table as an input into **DESeq2** for statistical analysis using the R-programming language.  
+
+#### Step 1a. Install required R-libraries
+```{r install, eval = F}
+
+library(DESeq2)
+library(ggplot2)
+library(clusterProfiler)
+library(biomaRt)
+library(pheatmap)
+library(GO.db)
+library(genefilter)
+library(dplyr)
+library(RColorBrewer)
+```
+
+#### Step 1b. Import featureCounts output
+We can import the **featureCounts** table found within the ```output/4_final_counts``` folder. 
+
+```{r featureCounts, eval = T, warning = F, message = F}
+# Import gene counts table
+# - skip first row 
+# - make row names the gene identifiers
+
+count_data = read.table('~/RNAseq_analysis/RNAseq/RNA_seq_workflow/output/4_final_counts/gene_counts.txt',
+                    header = TRUE, # use first row as column names
+                    skip = 1, # skip first row
+                    sep = '\t', # tab-separated file
+                    row.names = 1 # make row names the gene identifiers
+)
+
+# Remove char/length columns
+count_data = count_data[, 6:ncol(count_data)] # Extract row counts
+head(count_data)
+
+# Rename column names of count_data
+colnames(count_data) = c("SRR8437484",# control 1
+                         "SRR8437485",# control 2
+                         "SRR8437482",# control 3
+                         "SRR8437483",# control 4
+                         "SRR8437480",# Pst 48h 1
+                         "SRR8437481",# Pst 48h 2
+                         "SRR8437478",# Pst 48h 3
+                         "SRR8437479" # Pst 48h 4
+)
+
+# Drop `barley_control 2` and `barley_Pst 1`
+count_data = count_data[, -c(2, 5)]
+
+# make sure IDs are correct
+head(count_data)
+```
+
+#### Step 1c.Data Quality Assessment
+
+```{r dqa, eval = T, warning = F, message = F, fig.width =8, fig.height = 8}
+# 3.1 Basic statistics
+library_sizes = colSums(count_data)
+summary(library_sizes)
+
+# Boxplot of raw counts
+boxplot(log2(count_data + 1), las = 2, main = 'Raw Counts Distribution', col = 'skyblue')
+
+# PCA on raw counts
+pca = prcomp(t(log2(count_data + 1)))
+
+# Create a PCA plot
+plot(pca$x[,1], pca$x[,2], xlab = 'PC1', ylab = 'PC2', main = 'PCA of Raw Counts', pch = 19, col = 'dodgerblue')
+
+# Add sample names as labels
+text(pca$x[,1], pca$x[,2],
+     labels = colnames(count_data), # use column names as labels
+     pos = 4, # poistion the labels to the right of points
+     cex= 0.7, # adjust lable size
+     col = 'red')
+```
+
+#### Step 1d. Import metadata text file. 
+
+```{r metadata, eval = T, cache = TRUE, warning = F, message = F}
+
+# Import metadata text file. The SampleID's must be the first column
+
+metadata = read.delim('R analysis/metadata_filtered.txt', row.names = 1, header = TRUE)
+
+# Add sampleID's to the mapping file
+metadata$sampleid <- row.names(metadata)
+
+# Reorder sampleID's to match featureCounts column order. 
+metadata <- metadata[match(colnames(count_data), metadata$sampleid), ]
+head(metadata)
+
+# Ensure Condition is a factor
+metadata$Condition = as.factor(metadata$Condition)
+```
+### DESeq2 analysis
+
+#### Step 2a. Make DESeq2 object from counts and metadata
+```{r make_DESeq2, eval = T, cache = TRUE, warning = F, message = T }
+suppressMessages(suppressWarnings(library(DESeq2)))
+# - countData: count dataframe
+# - colData: sample metadata in the dataframe with row names as sample ID
+# - design: The design of the comparisons to use
+
+# Make DESeq2 object from counts and metadata
+ddsMat <- DESeqDataSetFromMatrix(countData = count_data,
+                                 colData = metadata,
+                                 design = ~ Condition)
+
+
+# Find differential expressed genes
+ddsMat <- DESeq(ddsMat)
+```
+
+#### Step 2b. Get basic statistics about the number of significant genes
+```{r DESeq2_res, cache = TRUE, warning = F, message = F}
+
+# Get results from testing with FDR adjust pvalues
+results <- results(ddsMat, pAdjustMethod = "fdr", alpha = 0.05)
+
+# Generate summary of testing. 
+summary(results)
+
+# Check directionality of the log2 fold changes
+## Log2 fold change is set as (LoGlu / HiGlu)
+## Postive fold changes = Increased in LoGlu
+## Negative fold changes = Decreased in LoGlu
+mcols(results, use.names = T)
+
+# Subset for only significant genes (q < 0.05)
+results_sig <- subset(results, padj < 0.05)
+head(results_sig)
+```
+
+### Step 3: Annotate gene symbols
+After alignment and summarization, we only have the annotated gene symbols. To get more information about significant genes, we can use annoated databases to convert gene symbols to Ensembl gene ID for further analysis.
+
+```{r gene_annotate, eval = T, warning = F, message = F}
+
+# Using biomaRt
+library(biomaRt)
+
+# 3a. Connect to Ensembl Plants (contains barley genome annotations)
+mart <- useMart(
+  biomart = "plants_mart", 
+  dataset = "hvulgare_eg_gene", 
+  host = "https://plants.ensembl.org"
+)
+
+# 3b. Extract gene IDs from results_sig1
+gene_ids = rownames(results_sig)
+head(gene_ids)
+length(gene_ids)
+
+# 3c. Query BioMart for GO terms and KEGG pathways
+# Fetch GO terms and KEGG annotations using BioMart
+annotations <- getBM(
+  attributes = c(
+    "ensembl_gene_id",
+    "external_gene_name",
+    "description",
+    "entrezgene_id",
+    "go_id",
+    "namespace_1003"  # To specify BP, MF, or CC
+  ),
+  filters = "ensembl_gene_id",
+  values = gene_ids,  # List of your significant gene IDs
+  mart = mart
+)
+
+# Check the number of rows
+nrow(results)
+nrow(annotations) 
+
+# Convert row names to a column in results_sig
+results_sig$GeneID <- rownames(results_sig)
+
+# Create a data frame from annotations
+annotations_df <- data.frame(
+  GeneID = annotations$ensembl_gene_id,
+  symbol = annotations$external_gene_name,
+  description = annotations$description,
+  entrez = annotations$entrezgene_id,
+  go_id = annotations$go_id,
+  namespace = annotations$namespace_1003,
+  stringsAsFactors = FALSE
+)
+
+# Check the structure of annotations_df
+str(annotations_df)
+
+# Convert results_sig to dataframe
+results_sig_df <- as.data.frame(results_sig)
+
+# Perform the merge
+results_sig1 <- merge(
+  results_sig_df,          # Converted results_sig data frame
+  annotations_df,          # Annotation data frame
+  by = "GeneID",           # Merge by GeneID
+  all.x = TRUE             # Keep all rows from results_sig_df
+)
+
+
+# Check the result
+head(results_sig1)
+
+# Save the annotated results to a file
+write.table(results_sig1, "R analysis/annotated_significant_results.txt", sep = "\t", row.names = FALSE, quote = FALSE)
+```
+### Step 4: Perform GO/KEGG enrichment to find pathways from differential expressed genes
+Pathway enrichment analysis is a great way to generate overall conclusions based on the individual gene changes. Sometimes individiual gene changes are overwhelming and are difficult to interpret. But by analyzing the pathways the genes fall into, we can gather a top level view of gene responses. 
+```{r go_enrichment, eval = F}
+# 4.1 Prepare TERM2GENE for Enrichment
+term2gene = annotations[,c('go_id', 'ensembl_gene_id')] # only selecting GO and ensembl gene id
+
+# 4.2 Check for any empty of malformed GO terms
+term2gene_clean = term2gene[grep("^GO:\\d+$", term2gene$go_id),]
+print(nrow(term2gene_clean)) # Count rows with valid GO IDs
+
+# 4.3 Check if gene_ids matches term2gene_clean
+valid_genes = intersect(gene_ids, term2gene_clean$ensembl_gene_id)
+print(length(valid_genes)) #Count matching genes
+
+term2gene_clean = term2gene_clean[term2gene_clean$ensembl_gene_id %in% gene_ids, ]
+print(nrow(term2gene_clean)) # Rows remaining after filtering
+
+library(clusterProfiler)
+go_enrichment = enricher(
+  gene = valid_genes, # Filtered genes
+  TERM2GENE = term2gene,
+  pvalueCutoff = 0.05
+)
+
+if (is.null(go_enrichment) || nrow(as.data.frame(go_enrichment)) == 0) {
+  print("No enrichment results. Check input data for validity.")
+} else {
+  # Convert enrichment results to a data frame
+  enrichment_results <- as.data.frame(go_enrichment)
+  
+  # Select relevant columns (e.g., Description, GeneRatio, p-value, adjusted p-value, gene list)
+  selected_columns <- enrichment_results[, c("ID", "Description", "GeneRatio", "pvalue", "p.adjust", "geneID")]
+  
+  # Print results in the console
+  print(selected_columns)
+}
+
+```
+
+### Step 5: Write all important results to .txt files
+```{r write_results, eval = F}
+# Write normalized gene counts to a .txt file
+write.table(x = as.data.frame(counts(ddsMat), normalized = T),
+            file = 'normalized_counts.txt',
+            sep = '\t',
+            quote = F,
+            col.names = NA)
+
+# Write significant normalized gene counts to .txt file
+write.table(x = counts(ddsMat[row.names(results_sig)], normalized = T),
+            file = 'normalized_counts_significant.txt',
+            sep = '\t',
+            quote = F,
+            col.names = NA)
+
+# Write significant annotated results table to a .txt file
+write.table(x = as.data.frame(results_sig), 
+            file = 'results_gene_annotated_significant',
+            sep = '\t',
+            quote = F,
+            col.names = NA)
+```
+
+### Step 6: Plotting gene expression data
+#### 6a. Principal Component Analysis (PCA) plot
+PCA helps visualize how gene expression profiles cluster between groups, revealing biological variance and potential batch effects.
+
+* X and Y axes (PC1 & PC2) show the major sources of variation in the dataset.
+* Samples from the same condition should cluster together, confirming consistency across replicates.
+* If samples do not separate by condition (as we can see here), it may indicate weak differential expression.
+
+```{r pca_plot, eval = T, fig.width = 5, fig.height = 6}
+library(ggplot2)
+# Convert all samples to rlog
+ddsMat_rlog = rlog(ddsMat, blind = FALSE)
+
+# Plot PCA by column variable
+pca_data <- plotPCA(ddsMat_rlog, intgroup = 'Condition', ntop = 100, returnData = TRUE)
+percentVar <- round(100 * attr(pca_data, 'percentVar'))
+
+# Plot PCA by column variable
+ggplot(pca_data, aes(PC1, PC2, color = Condition)) +
+  theme_bw() + # remove default ggplot2 theme
+  geom_point(size = 4) + # Increase point size
+  scale_y_continuous(limits = c(-20, 20)) + # change limits to fix figure dimensions
+  ggtitle(label = "Principal Component Analysis (PCA)", 
+          subtitle = "Top 100 most variable genes") + 
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance"))
+```
+
+
+
+#### 6b. Heatmap of differentially expressed genes
+Heatmaps show expression levels of the most significant genes across different conditions.
+
+* Each row represents a gene, and each column represents a sample.
+The color intensity reflects gene expression levels (e.g., higher expression in dark orange, lower in yellow).
+* If genes cluster by condition, it suggests strong differential expression.
+* If clustering is inconsistent, batch effects or noise may be present.
+```{r heatmap, eval = T, fig.height=8, fig.width=6}
+# Convert all samples to rlog
+ddsMat_rlog <- rlog(ddsMat, blind = FALSE)
+
+# Gather 20 significant genes and make matrix
+mat <- assay(ddsMat_rlog[row.names(results_sig)])[1:20, ]
+
+# Choose which column variables you want to annotate the columns by.
+annotation_col = data.frame(
+  Group = factor(colData(ddsMat_rlog)$Condition)
+  #row.names = colData(ddsMat_rlog)$sampleid
+)
+
+# Specify colors you want to annotate the columns by.
+ann_colors = list(
+  Group = c(LoGlu = "lightblue", HiGlu = "darkorange")
+)
+
+# Make Heatmap with pheatmap function.
+## See more in documentation for customization
+library(RColorBrewer)
+library(pheatmap)
+pheatmap(mat = mat, 
+         color = colorRampPalette(brewer.pal(9, "YlOrBr"))(255), 
+         scale = "row", # Scale genes to Z-score (how many standard deviations)
+         annotation_col = annotation_col, # Add multiple annotations to the samples
+         annotation_colors = ann_colors,# Change the default colors of the annotations
+         fontsize = 6.5, # Make fonts smaller
+         cellwidth = 55, # Make the cells wider
+         show_colnames = F)
+```
+
+
+
+#### Step 6c. Volcano Plot
+A volcano plot combines statistical significance (p-value) with magnitude of expression changes (log₂ fold change).
+
+* X-axis: log₂(Fold Change) → Magnitude of change in gene expression.
+* Y-axis: -log₁₀(p-value) → Statistical significance of changes.
+* Genes in green (right) are significantly upregulated, while genes in red (left) are significantly downregulated.
+* Genes with low p-values but small fold changes might not be biologically relevant.
+
+```{r volcano_plot, eval = T}
+suppressMessages(suppressWarnings(library(dplyr)))
+# Gather Log-fold change and FDR-corrected pvalues from DESeq2 results
+## - Change pvalues to -log10 (1.3 = 0.05)
+data <- data.frame(gene = row.names(results),
+                   pval = -log10(results$padj), 
+                   lfc = results$log2FoldChange)
+
+# Remove any rows that have NA as an entry
+data <- na.omit(data)
+
+# Color the points which are up or down
+## If fold-change > 0 and pvalue > 1.3 (Increased significant)
+## If fold-change < 0 and pvalue > 1.3 (Decreased significant)
+data <- mutate(data, color = case_when(data$lfc > 0 & data$pval > 1.3 ~ "Increased",
+                                       data$lfc < 0 & data$pval > 1.3 ~ "Decreased",
+                                       data$pval < 1.3 ~ "nonsignificant"))
+
+ggplot(data, aes(x = lfc, y = pval, color = color)) +
+  ggtitle(label = "Volcano Plot", subtitle = "Colored by fold-change direction") +
+  geom_point(size = 2.5, alpha = 0.8, na.rm = TRUE) +
+  scale_color_manual(name = "Direction",
+                     values = c(Increased = "#008B00", Decreased = "#CD4F39", nonsignificant = "darkgray")) +
+  theme_bw(base_size = 14) + 
+  theme(legend.position = "right") + 
+  xlab(expression(log[2]("LoGlu" / "HiGlu"))) + # Change X-Axis label
+  ylab(expression(-log[10]("adjusted p-value"))) + # Change Y-Axis label
+  geom_hline(yintercept = 1.3, colour = "darkgrey") + # Add p-adj value cutoff line
+  scale_y_continuous(trans = "log1p") # Scale yaxis due to large p-values
+
+```
+
+
+
+#### Step 6d: Mean-Average plot (MA plot)
+The MA plot is used to visualize the distribution of RNA-seq data by plotting the mean expression levels against log₂ fold changes.
+
+* X-axis (Mean of Normalized Counts): Represents average expression across all samples.
+* Y-axis (log₂ Fold Change): Represents the magnitude of differential expression.
+* Each dot represents a gene.
+* Genes near log₂ Fold Change = 0 have no differential expression.
+* Genes with high expression and large fold changes are biologically interesting.
+* This plot helps identify genes with large expression changes.
+* It also highlights low-expression genes that may be unreliable due to noise.
+* And ensures the data distribution is not biased, which is important for DESeq2 analysis.
+```{r ma_plot, fig.width=6, fig.height = 4}
+plot(results$baseMean, results$log2FoldChange, 
+     log = "", ylim = c(-5, 5),
+     xlab = "Mean of Normalized Counts",
+     ylab = "Log2 Fold Change",
+     main = "MA Plot without Log Scaling")
+```
+
+
+
+
+#### Step 6e. Dispersion plot
+The dispersion plot evaluates how gene expression variability behaves relative to expression levels.
+
+* X-axis: Mean expression level (Base Mean).
+* Y-axis: Dispersion (how much genes vary across replicates).
+If genes deviate too much from the trend, they may be highly variable or unreliable.
+This plot is important for validating whether the DESeq2 model assumptions hold.
+
+```{r disp_plot, eval = T, fig.width=6, fig.height = 4}
+plotDispEsts(ddsMat)
+```
+
+
+
+#### Step 6f. Single gene plot
+A single-gene plot shows how a specific gene's expression varies between conditions.
+
+* X-axis: Sample condition (e.g., "Control" vs. "Pst").
+* Y-axis: Normalized expression level.
+* The gene selected is the one with the highest differential expression.
+* This visualization helps validate biologically relevant gene expression patterns.
+```{r single_plot, eval = T, fig.width = 5, fig.height = 4}
+# Convert all samples to rlog
+ddsMat_rlog <- rlog(ddsMat, blind = FALSE)
+
+# Get gene with highest expression
+top_gene <- rownames(results)[which.min(results$log2FoldChange)]
+
+# Plot single gene
+plotCounts(dds = ddsMat, 
+           gene = top_gene, 
+           intgroup = "Condition", 
+           normalized = T, 
+           transform = T,
+           col = as.numeric(ddsMat$Condition)
+           )
+```
+
