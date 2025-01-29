@@ -1,6 +1,6 @@
 # Transcriptomic Response of Barley to *Pseudomonas syringae* Infection
 
-## 📌 Project Overview
+## Project Overview
 
 This repository contains an **RNA-seq analysis workflow** for studying the transcriptomic response of wild-type barley (*Hordeum vulgare*) to *Pseudomonas syringae* infection. The analysis involves **quality control, read alignment, gene quantification, differential expression analysis (DEA), and functional enrichment analysis**.
 
@@ -10,7 +10,7 @@ The workflow was implemented in two phases:
 
 ---
 
-## 📜 **Dataset Information**
+## **Dataset Information**
 The RNA-seq dataset used in this project was sourced from:
 
 **Paper**:  
@@ -22,9 +22,9 @@ This project analyzed a **subset of the dataset**, focusing only on **wild-type 
 
 ---
 
-## 🛠 **Pipeline Workflow**
+## **Pipeline Workflow**
 
-### **🔹 Phase 1: RNA-seq Preprocessing (Python)**
+### ** Phase 1: RNA-seq Preprocessing (Python)**
 Performed in **Jupyter Notebooks**:
 1. **Download Annotation & FASTQ Files**
 2. **Quality Control** using `FastQC`
@@ -34,7 +34,7 @@ Performed in **Jupyter Notebooks**:
 6. **Convert & Sort SAM to BAM Files** using `Samtools`
 7. **Gene Quantification** using `featureCounts`
 
-### **🔹 Phase 2: Differential Expression & Enrichment (R)**
+### ** Phase 2: Differential Expression & Enrichment (R)**
 Conducted using **R scripts**:
 1. **Import Gene Counts** into `DESeq2`
 2. **Data Quality Assessment** (PCA, Boxplots)
